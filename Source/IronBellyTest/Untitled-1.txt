@@ -1,0 +1,252 @@
+	// Components
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+		class USpringArmComponent* SpringArm;
+
+	UPROPERTY(Category = Character, VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
+		class UCameraComponent* CamComp;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Flipbooks)
+		class UPaperFlipbook* IdleAnim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Flipbooks)
+		class UPaperFlipbook* RunAnim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Flipbooks)
+		class UPaperFlipbook* JumpAnim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Flipbooks)
+		class UPaperFlipbook* JumpUpAnim;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Flipbooks)
+		class UPaperFlipbook* JumpDownAnim;
+
+
+
+
+// Copyright Epic Games, Inc. All Rights Reserved.
+
+#include "TestProject2Pawn.h"
+#include "TestProject2Projectile.h"
+#include "TimerManager.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Camera/CameraComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/InputComponent.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Engine/CollisionProfile.h"
+#include "Engine/StaticMesh.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+
+const FName ATestProject2Pawn::MoveForwardBinding("MoveForward");
+const FName ATestProject2Pawn::MoveRightBinding("MoveRight");
+const FName ATestProject2Pawn::FireForwardBinding("FireForward");
+const FName ATestProject2Pawn::FireRightBinding("FireRight");
+
+ATestProject2Pawn::ATestProject2Pawn()
+{	
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ShipMesh(TEXT("/Game/TwinStick/Meshes/TwinStickUFO.TwinStickUFO"));
+	// Create the mesh component
+	ShipMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShipMesh"));
+	RootComponent = ShipMeshComponent;
+	ShipMeshComponent->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+	ShipMeshComponent->SetStaticMesh(ShipMesh.Object);
+	
+	// Cache our sound effect
+	static ConstructorHelpers::FObjectFinder<USoundBase> FireAudio(TEXT("/Game/TwinStick/Audio/TwinStickFire.TwinStickFire"));
+	FireSound = FireAudio.Object;
+
+	// Create a camera boom...
+	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
+	CameraBoom->SetupAttachment(RootComponent);
+	CameraBoom->SetUsingAbsoluteRotation(true); // Don't want arm to rotate when ship does
+	CameraBoom->TargetArmLength = 1200.f;
+	CameraBoom->SetRelativeRotation(FRotator(-80.f, 0.f, 0.f));
+	CameraBoom->bDoCollisionTest = false; // Don't want to pull camera in when it collides with level
+
+	// Create a camera...
+	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("TopDownCamera"));
+	CameraComponent->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
+	CameraComponent->bUsePawnControlRotation = false;	// Camera does not rotate relative to arm
+
+	// Movement
+	MoveSpeed = 1000.0f;
+	// Weapon
+	GunOffset = FVector(90.f, 0.f, 0.f);
+	FireRate = 0.1f;
+	bCanFire = true;
+}
+
+void ATestProject2Pawn::SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent)
+{
+	check(PlayerInputComponent);
+
+	// set up gameplay key bindings
+	PlayerInputComponent->BindAxis(MoveForwardBinding);
+	PlayerInputComponent->BindAxis(MoveRightBinding);
+	PlayerInputComponent->BindAxis(FireForwardBinding);
+	PlayerInputComponent->BindAxis(FireRightBinding);
+}
+
+void ATestProject2Pawn::Tick(float DeltaSeconds)
+{
+	// Find movement direction
+	const float ForwardValue = GetInputAxisValue(MoveForwardBinding);
+	const float RightValue = GetInputAxisValue(MoveRightBinding);
+
+	// Clamp max size so that (X=1, Y=1) doesn't cause faster movement in diagonal directions
+	const FVector MoveDirection = FVector(ForwardValue, RightValue, 0.f).GetClampedToMaxSize(1.0f);
+
+	// Calculate  movement
+	const FVector Movement = MoveDirection * MoveSpeed * DeltaSeconds;
+
+	// If non-zero size, move this actor
+	if (Movement.SizeSquared() > 0.0f)
+	{
+		const FRotator NewRotation = Movement.Rotation();
+		FHitResult Hit(1.f);
+		RootComponent->MoveComponent(Movement, NewRotation, true, &Hit);
+		
+		if (Hit.IsValidBlockingHit())
+		{
+			const FVector Normal2D = Hit.Normal.GetSafeNormal2D();
+			const FVector Deflection = FVector::VectorPlaneProject(Movement, Normal2D) * (1.f - Hit.Time);
+			RootComponent->MoveComponent(Deflection, NewRotation, true);
+		}
+	}
+	
+	// Create fire direction vector
+	const float FireForwardValue = GetInputAxisValue(FireForwardBinding);
+	const float FireRightValue = GetInputAxisValue(FireRightBinding);
+	const FVector FireDirection = FVector(FireForwardValue, FireRightValue, 0.f);
+
+	// Try and fire a shot
+	FireShot(FireDirection);
+}
+
+void ATestProject2Pawn::FireShot(FVector FireDirection)
+{
+	// If it's ok to fire again
+	if (bCanFire == true)
+	{
+		// If we are pressing fire stick in a direction
+		if (FireDirection.SizeSquared() > 0.0f)
+		{
+			const FRotator FireRotation = FireDirection.Rotation();
+			// Spawn projectile at an offset from this pawn
+			const FVector SpawnLocation = GetActorLocation() + FireRotation.RotateVector(GunOffset);
+
+			UWorld* const World = GetWorld();
+			if (World != nullptr)
+			{
+				// spawn the projectile
+				World->SpawnActor<ATestProject2Projectile>(SpawnLocation, FireRotation);
+			}
+
+			bCanFire = false;
+			World->GetTimerManager().SetTimer(TimerHandle_ShotTimerExpired, this, &ATestProject2Pawn::ShotTimerExpired, FireRate);
+
+			// try and play the sound if specified
+			if (FireSound != nullptr)
+			{
+				UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+			}
+
+			bCanFire = false;
+		}
+	}
+}
+
+void ATestProject2Pawn::ShotTimerExpired()
+{
+	bCanFire = true;
+}
+
+
+
+void AISMCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	//~~~~~~~~~~~~
+
+	FVector Start	= GetActorLocation();
+	FVector End 	= Start + GetActorRotation().Vector() * 10240;
+	
+	FCollisionQueryParams TraceParams(FName(TEXT("VictoreCore Trace")), true, this);
+	TraceParams.bTraceComplex = true;
+
+	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Focus of this wiki, telling UE4 we want the UV info!
+	TraceParams.bReturnUV = true;
+	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	
+	//Ignore Actors
+	TraceParams.AddIgnoredActor(this);
+	
+	//Trace!
+        FHitResult HitOut;
+	GetWorld()->LineTraceSingle(
+		HitOut,		//result
+		Start,	//start
+		End , //end
+		ECC_Pawn, //collision channel
+		TraceParams
+	);
+	 
+	VSCREENMSG2("UV!", HitOut.UV.ToString());
+}
+
+A gun that's known for fireing quick-travel, dense beams that will penetrate shields, hulls and surely skulls. This gun requires time to build up the energy to fire a shot.
+
+
+SO! Here I am, changing up my angle. I’ve decided that I DO want to continue working in the game development scene (vs the safe but machine-like corporate software engineering side) and I figured I’d try to reach out to some game development studios. I’m not incredibly worried about the pay. I’m at a company (in a corporate setting) now that pays really well but I haven’t changed my lifestyle to match my income
+
+
+
+Hi! My name is Kevin Sweet and I have a background in software engineering and hardware integration, so to put it bluntly I have intimate knowledge of the inner workings of a fair portion of the tech-world.
+
+I've worked directly for customers on feature integrations throughout my freelance software development career, so there wasn't a whole lot of human interaction. When I got a job at CES, I was able to take charge of several contracts projects and work with customers on the direction of said project.. and I love, LOVED it. As it turns out, I love working with people but lacked the exposure within my career to this sort of customer-facing work. CES shutdown our warehouse during covid-19 and subsequently lost the contracts I worked on, so I went back to what I know; Software.
+
+Everything's going well but I do miss dealing with customers at volume, so I figured I would take a change in career that wouldn't exactly render my existing skills moot.. Well, anyhoo! I hope I didn't ramble too much. Thanks for taking the time to read this. If I don't hear back from you, be safe and good luck finding your future candidates!
+
+-Kevin Sweet
+
+8/3/2021 - 8/13/2021 8am - 6pm Eastern
+
+
+Hello! I was browsing indeed and I saw your listing here. I think this is fitting for where I am at with my UE4 experience and I hope that you reach the same conclusion!
+
+I've been working on small-scope projects in UE4 since late 2017 that I've mostly acquired from the Unreal Slackers discord's job listings.  Unfortunately, none of the projects I've worked on have been released (and most have been abandoned), but despite that, I've become more and more interested in working with this software. I've decided to try and get some experience under my belt working with an established studio and work on a project I can put my name to, which is why I'm now applying!
+
+I would like to be frank and point out my weaknesses in UE4; I don't have much experience with networking, I don't know lighting best practices, how to best optimize assets, AR/VR and I have absolutely no experience with animation programming (Aside from simply calling an animation play or montage). But in an attempt to counter that, I am a fast learner and I am very flexible! Anyway, thanks you for your consideration!
+
+If, even with those holes in my Unreal skill-set, I seem like a good fit, I'd love to hear from you!
+
+Thanks, 
+-Kevin Sweet
+
+
+
+
+
+Ah, yes! POWER! This is the overall strength or health of the shield. It allows the shields to remain activated for a longer time and take more damage.
+
+Active shields draw directly from the capacitor, which takes time to recharge. This upgrade comes with a (almost) brand new (gently used) capacitor capable of faster shield regeneration rates! 
+
+This handy upgrade reduces the power drain on the capacitor that comes with maintaining an active shield, allowing for longer active shield times.
+
+After the shield has overdrawn the generator, the generator requires a reboot. This upgrade leads to faster boot times so you can get your shields up and running again in no time!
+
+
+Live to fight another day! This one is pretty important for obvious reasons. If you're dead, then what? No, seriously! This is THE question just about everyone in the known universe is asking and there's a lot of theories and speculation and even WAR around this topic. What are your thoughts? Ya know what? Another time perhaps.. 
+
+This upgrade increases your ships maximum health and THAT MEANS you can take more of a beating, not that this idea is exactly pleasing. It's just the reality of it all. Live longer, fight harder and enjoy the little things!
+
+When your shields are up, they generate a magnetic field, which pulls things that you'd want TOWARDS your ship, for easier reception! Things like money, not things like bullets and lasers. That'd be awful. Anyway, this upgrade ups the magnetism of your shields.
+
+Thrusters! Yeah, this one is pretty rad because you can get from point A to point B faster without the burden of worse gas milage. This is mostly because this ship doesn't even run on gas. It runs on song and dance, or so they say... Who are "they"?
+
+
+sdfsdfgsdfs
+
+
