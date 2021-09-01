@@ -25,11 +25,14 @@ void UWAmmo::InitializeWidget()
 
 void UWAmmo::OnAmmoChanged(int InAmmo)
 {
+	APawn* PlayerPawn = GetOwningPlayerPawn();
+
+	AIronBellyTestCharacter* Player = Cast<AIronBellyTestCharacter>(PlayerPawn);
+
 	if (AmmoCountLabel)
 	{
 		AmmoCountLabel->SetText(FText::FromString(FString::FromInt(InAmmo)));
 	}
-
 }
 
 
@@ -71,7 +74,6 @@ TSharedRef<SWidget> UWAmmo::RebuildWidget()
 			UCanvasPanelSlot* AmmoCountAsSlot = Cast<UCanvasPanelSlot>(AmmoCountLabel->Slot);
 			AmmoCountAsSlot->SetAlignment(FVector2D(-1.25f, 0.0f));
 		}
-
 	}
 
 	return Widget;

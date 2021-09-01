@@ -13,6 +13,7 @@
 #include "XRMotionControllerBase.h" // for FXRMotionControllerBase::RightHandSourceId
 #include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h" // Line traces
+#include "Net/UnrealNetwork.h" 
 
 DEFINE_LOG_CATEGORY_STATIC(LogFPChar, Warning, All);
 
@@ -36,7 +37,7 @@ AIronBellyTestCharacter::AIronBellyTestCharacter()
 
 	// Create a mesh component that will be used when being viewed from a '1st person' view (when controlling this pawn)
 	Mesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CharacterMesh1P"));
-	Mesh1P->SetOnlyOwnerSee(false);
+	Mesh1P->SetOnlyOwnerSee(false); // I slapped on a hilarious skeletal mesh from the engine to represent something in multiplayer via the blueprint
 	Mesh1P->SetupAttachment(FirstPersonCameraComponent);
 	Mesh1P->bCastDynamicShadow = false;
 	Mesh1P->CastShadow = false;
@@ -45,7 +46,7 @@ AIronBellyTestCharacter::AIronBellyTestCharacter()
 
 	// Create a gun mesh component
 	FP_Gun = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FP_Gun"));
-	FP_Gun->SetOnlyOwnerSee(false);			// otherwise won't be visible in the multiplayer
+	FP_Gun->SetOnlyOwnerSee(true);
 	FP_Gun->bCastDynamicShadow = false;
 	FP_Gun->CastShadow = false;
 	// FP_Gun->SetupAttachment(Mesh1P, TEXT("GripPoint"));
@@ -71,7 +72,7 @@ AIronBellyTestCharacter::AIronBellyTestCharacter()
 	// Create a gun and attach it to the right-hand VR controller.
 	// Create a gun mesh component
 	VR_Gun = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("VR_Gun"));
-	VR_Gun->SetOnlyOwnerSee(false);			// otherwise won't be visible in the multiplayer
+	VR_Gun->SetOnlyOwnerSee(true);
 	VR_Gun->bCastDynamicShadow = false;
 	VR_Gun->CastShadow = false;
 	VR_Gun->SetupAttachment(R_MotionController);
@@ -84,6 +85,7 @@ AIronBellyTestCharacter::AIronBellyTestCharacter()
 
 	// Uncomment the following line to turn motion controllers on by default:
 	//bUsingMotionControllers = true;
+	//OnAmmoChanged.AddDynamic(this, AIronBellyTestCharacter::UpdateAmmo);
 
 	bReplicates = true;
 }
@@ -108,9 +110,21 @@ void AIronBellyTestCharacter::BeginPlay()
 		Mesh1P->SetHiddenInGame(false, true);
 	}
 
-	AmmoInClip = AmmoClipSize;
-	OnAmmoChanged.Broadcast(AmmoInClip);
+	// According to print spam, some of the ordering of initialized actors
+	// are reversed for the Listen Server Characters, so these values are 
+	// broadcast before the HUD, and by extension the Ammo widget, is
+	// around to even listen for it. So, here's a hotfix/delay to allow time 
+	// for listeners.
+	FTimerHandle Handler;
+	GetWorldTimerManager().SetTimer(Handler, [this]()
+	{
+		AmmoInClip = AmmoClipSize;
+		OnAmmoChanged.Broadcast(AmmoInClip);
+		UpdateAmmo(AmmoInClip);
+	}, 0.01f, false);
+
 }
+
 
 //////////////////////////////////////////////////////////////////////////
 // Input
@@ -178,7 +192,7 @@ void AIronBellyTestCharacter::OnFire()
 				SpawnShot(ProjectileClass, SpawnLocation, SpawnRotation);
 
 				AmmoInClip -= 1;
-				OnAmmoChanged.Broadcast(AmmoInClip);
+				UpdateAmmo(AmmoInClip);
 
 			}
 		}
@@ -243,16 +257,6 @@ void AIronBellyTestCharacter::EndTouch(const ETouchIndex::Type FingerIndex, cons
 		return;
 	}
 	TouchItem.bIsPressed = false;
-}
-
-void AIronBellyTestCharacter::Interact_Implementation()
-{
-	if (PickupsInRange.Num() == 0)
-	{
-		return;
-	}
-
-	PickupsInRange[PickupsInRange.Num() - 1]->OnPickedUp_Implementation(this);
 }
 
 //Commenting this section out to be consistent with FPS BP template.
@@ -391,4 +395,40 @@ void AIronBellyTestCharacter::AimTrace(FVector& OutStart, FVector& OutEnd)
 
 	OutStart = Start;
 	OutEnd = End;
+}
+
+void AIronBellyTestCharacter::UpdateAmmo(int InAmmo)
+{
+	AmmoInClip = InAmmo;
+	OnAmmoChanged.Broadcast(AmmoInClip);
+}
+
+void AIronBellyTestCharacter::Interact()
+{
+	// Client call to server
+	if (GetRemoteRole() == ROLE_Authority)
+	{
+		ServerInteract();
+		return;
+	}
+
+	// Server on server
+	if (PickupsInRange.Num() > 0 && IsValid(PickupsInRange[PickupsInRange.Num() - 1]))
+	{
+		PickupsInRange[PickupsInRange.Num() - 1]->OnPickedUp(this);
+		int Ammo = AmmoInClip + 1;
+		UpdateAmmo(Ammo);
+	}
+
+
+}
+
+void AIronBellyTestCharacter::ServerInteract_Implementation()
+{
+	if (PickupsInRange.Num() > 0 && IsValid(PickupsInRange[PickupsInRange.Num() - 1]))
+	{
+		PickupsInRange[PickupsInRange.Num() - 1]->OnPickedUp(this);
+		int Ammo = AmmoInClip + 1;
+		UpdateAmmo(Ammo);
+	}
 }

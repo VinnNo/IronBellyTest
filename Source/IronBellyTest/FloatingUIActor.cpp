@@ -25,6 +25,7 @@ AFloatingUIActor::AFloatingUIActor()
 	FloatingWidget->SetWidgetClass(UWFloatingPickupUI::StaticClass());
 	FloatingWidget->SetWidgetSpace(EWidgetSpace::Screen);
 	FloatingWidget->SetRelativeLocation(FVector(0.0f, 0.0f, -10.0f));
+	FloatingWidget->bOnlyOwnerSee = true;
 
 	SightRadius = CreateDefaultSubobject<USphereComponent>(TEXT("SightRadius"));
 	SightRadius->SetupAttachment(RootComponent);
@@ -45,7 +46,24 @@ AFloatingUIActor::AFloatingUIActor()
 void AFloatingUIActor::BeginPlay()
 {
 	Super::BeginPlay();
-	FloatingWidget->SetWidgetSpace(EWidgetSpace::Screen);
+
+	FTimerHandle Handler;
+	GetWorldTimerManager().SetTimer(Handler, [this]()
+	{
+		FloatingWidget->SetWidgetSpace(EWidgetSpace::Screen);
+		TArray<AActor*> Actors;
+		SightRadius->GetOverlappingActors(Actors, AIronBellyTestCharacter::StaticClass());
+		if (Actors.Num() > 0 && IsValid(Actors[0]))
+		{
+			AIronBellyTestCharacter* Character = Cast<AIronBellyTestCharacter>(Actors[0]);
+			if (Character != nullptr)
+			{
+				Character->PickupsInRange.Add(this);
+				CharactersInRange.Add(Character);
+				SetHidden(false);
+			}
+		}
+	}, 0.01f, false);
 }
 
 // Called every frame
@@ -74,6 +92,7 @@ void AFloatingUIActor::OnOverlapEnd(UPrimitiveComponent* OverlappedComp,
 	AIronBellyTestCharacter* Character = Cast<AIronBellyTestCharacter>(OtherActor);
 	if (Character != nullptr)
 	{
+
 		Character->PickupsInRange.Remove(this);
 		CharactersInRange.Remove(Character);
 		if (CharactersInRange.Num() == 0)
@@ -83,13 +102,12 @@ void AFloatingUIActor::OnOverlapEnd(UPrimitiveComponent* OverlappedComp,
 	}
 }
 
+
 void AFloatingUIActor::OnPickedUp_Implementation(AIronBellyTestCharacter* OtherCharacter)
 {
 	if (OtherCharacter != nullptr)
 	{
 		OtherCharacter->PickupsInRange.Remove(this);
-		int Ammo = OtherCharacter->AmmoInClip += 1;
-		OtherCharacter->OnAmmoChanged.Broadcast(Ammo);
 		if (CharactersInRange.Num() > 0)
 		{
 			for (int Itr = 0; Itr < CharactersInRange.Num(); ++Itr)
@@ -101,16 +119,8 @@ void AFloatingUIActor::OnPickedUp_Implementation(AIronBellyTestCharacter* OtherC
 
 	if (ParentActor != nullptr)
 	{
-		// For some reason there is a pretty big delay when playing in client mode
-		// for destroying this actor. That's why I've gotten a LITTLE desperate here. 
-		SetActorHiddenInGame(true);
 		Cast<AIronBellyTestProjectile>(ParentActor)->DestroyUIActor();
 		ParentActor->Destroy();
+		Destroy();
 	}
 }
-
-void AFloatingUIActor::GetLifetimeReplicatedProps(TArray< FLifetimeProperty >& OutLifetimeProps) const
-{
-	DOREPLIFETIME(AFloatingUIActor, ParentActor);
-}
-

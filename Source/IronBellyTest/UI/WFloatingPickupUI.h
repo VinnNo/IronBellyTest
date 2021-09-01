@@ -30,4 +30,6 @@ public:
 	UWFloatingPickupUI(const FObjectInitializer& ObjectInitializer);
 
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+
+	virtual void NativeConstruct() override;
 };

@@ -61,6 +61,7 @@ class AIronBellyTestCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (AllowPrivateAccess = "true"))
 	UMotionControllerComponent* L_MotionController;
 
+
 public:
 	AIronBellyTestCharacter();
 
@@ -185,8 +186,16 @@ protected:
 	void TouchUpdate(const ETouchIndex::Type FingerIndex, const FVector Location);
 	TouchData	TouchItem;
 
-	UFUNCTION(Server, Reliable)
+	UFUNCTION()
 	void Interact();
+
+	UFUNCTION(Server, Reliable)
+	void ServerInteract();
+
+public:
+
+	UFUNCTION(BlueprintCallable)
+	void UpdateAmmo(int InAmmo);
 	
 protected:
 	// APawn interface

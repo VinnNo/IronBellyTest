@@ -3,6 +3,8 @@
 
 #include "WFloatingPickupUI.h"
 
+#include "Kismet/GameplayStatics.h"
+
 #include "Engine.h"
 
 UWFloatingPickupUI::UWFloatingPickupUI(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
@@ -10,6 +12,16 @@ UWFloatingPickupUI::UWFloatingPickupUI(const FObjectInitializer& ObjectInitializ
 
 }
 
+void UWFloatingPickupUI::NativeConstruct()
+{
+	Super::NativeConstruct();
+	FTimerHandle Handler;
+
+	GetWorld()->GetTimerManager().SetTimer(Handler, [this]()
+	{
+		RebuildWidget();
+	}, 0.1f, false);
+}
 
 TSharedRef<SWidget> UWFloatingPickupUI::RebuildWidget()
 {
@@ -38,11 +50,10 @@ TSharedRef<SWidget> UWFloatingPickupUI::RebuildWidget()
 		{
 			PickupTextLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			RootWidget->AddChild(PickupTextLabel);
-			PickupTextLabel->SetText(FText::FromString(TEXT("Press E to Pickup")));
-
-			UCanvasPanelSlot* TextAsSlot = Cast<UCanvasPanelSlot>(PickupTextLabel->Slot);
-			TextAsSlot->SetAlignment(FVector2D(-1.5F, -5.0f));
 		}
+		PickupTextLabel->SetText(FText::FromString(TEXT("Press E to Pickup")));
+		UCanvasPanelSlot* TextAsSlot = Cast<UCanvasPanelSlot>(PickupTextLabel->Slot);
+		TextAsSlot->SetAlignment(FVector2D(-1.5F, -5.0f));
 	}
 
 	return Widget;

@@ -15,7 +15,7 @@
 
 
 
-AIronBellyTestProjectile::AIronBellyTestProjectile() 
+AIronBellyTestProjectile::AIronBellyTestProjectile()
 {
 	// Use a sphere as a simple collision representation
 	CollisionComp = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComp"));
@@ -48,8 +48,10 @@ AIronBellyTestProjectile::AIronBellyTestProjectile()
 	ProjectileMovement->ProjectileGravityScale = 0.0f;
 	ProjectileMovement->bShouldBounce = true;
 
-	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
+	SetReplicateMovement(true);
+
+	PrimaryActorTick.bCanEverTick = true;
 }
 
 void AIronBellyTestProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor,

@@ -28,7 +28,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Widget)
 		UWFloatingPickupUI* Widget;
 
-	UPROPERTY( replicated )
+	UPROPERTY()
 		AActor* ParentActor;
 
 	// Used to determine if the Widget component should be hidden or not.
@@ -40,8 +40,6 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
-
-	virtual void GetLifetimeReplicatedProps(TArray< FLifetimeProperty >& OutLifetimeProps) const override;
 
 public:	
 	// Called every frame
@@ -57,7 +55,7 @@ public:
 			class AActor* OtherActor, class UPrimitiveComponent* OtherComp, 
 			int32 OtherBodyIndex);
 
-	UFUNCTION( Server, Reliable, BlueprintCallable)
+	UFUNCTION( NetMulticast, Reliable, BlueprintCallable)
 		void OnPickedUp(AIronBellyTestCharacter* OtherCharacter);
 
 };
